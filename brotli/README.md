@@ -87,4 +87,14 @@ curl -fsSL $S | bash -s -- ~/code ~/work    # repos under other dirs
 curl -fsSL $S | bash -s -- -q ~/code        # only repos with findings (cron)
 ```
 
-Needs `python3` >= 3.10 and `curl`. JFrog's scripts are downloaded from a pinned commit into a temp dir, with `tree-sitter` in a throwaway venv; both are deleted on exit. Your repos are only read. Exit code is 2 if any repo is `APPLICABLE`, 3 if nothing was found but some files could not be checked, 0 otherwise. Run `brotli-cve-check.sh` too: this one checks code, that one checks installed versions.
+Needs `python3` >= 3.10, `curl` and `git`. JFrog's scripts are downloaded from a pinned commit into a temp dir, with `tree-sitter` in a throwaway venv; both are deleted on exit. Your repos are only read. Exit code is 2 if any repo is `APPLICABLE`, 3 if nothing was found but some files could not be checked, 0 otherwise. Run `brotli-cve-check.sh` too: this one checks code, that one checks installed versions.
+
+**What is scanned**
+
+| Layer | Files | Source |
+|---|---|---|
+| JavaScript, Python, ELF binaries, shell scripts | `.js`, `.py`, any ELF, `.sh .bash .rb .pl` | JFrog, unchanged |
+| TypeScript / ESM / CJS / JSX | `.ts .tsx .mts .cts .mjs .cjs .jsx` (not `.d.ts`) | JFrog's JS analysis, run by us with the TypeScript grammar (`tree-sitter-typescript`), because JFrog only reads `.js` |
+| Other languages | `.java .kt .scala .go .rs .rb .php .c .cc .cpp .h .cs .swift .dart .ex .lua .zig` and similar | ours: any file that mentions `brotli` is listed as `REVIEW`. Mentions only, nothing is analysed, and the exit code is unchanged |
+
+The other-languages layer reads tracked and untracked-but-not-ignored files (`git ls-files`), so vendored or ignored trees are skipped. Still not covered: Python/JS dependencies (`node_modules`, `site-packages` are skipped, use `brotli-cve-check.sh`), Mach-O and PE binaries, stripped static binaries, and any language not listed.
