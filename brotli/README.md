@@ -89,6 +89,8 @@ curl -fsSL $S | bash -s -- -q ~/code        # only repos with findings (cron)
 
 Needs `python3` >= 3.10, `curl` and `git`. JFrog's scripts are downloaded from a pinned commit into a temp dir, with `tree-sitter` in a throwaway venv; both are deleted on exit. Your repos are only read. Exit code is 2 if any repo is `APPLICABLE`, 3 if nothing was found but some files could not be checked, 0 otherwise. Run `brotli-cve-check.sh` too: this one checks code, that one checks installed versions.
 
+**VERSIONS column.** Each repo also gets the worst `dir` result from `brotli-cve-check.sh` for its dependency files: `VULNERABLE` (a vulnerable Brotli or Node version is pinned), `review`, `ok`, or `-` (no dependency files found). Repos that are `APPLICABLE` and `VULNERABLE` sort first, since that is where a code path meets a vulnerable decoder. It reads declared and locked versions, not what is installed on this machine; use `brotli-cve-check.sh host` for that. When run from a clone it uses the sibling `brotli-cve-check.sh`, otherwise it fetches it from this repo.
+
 **What is scanned**
 
 | Layer | Files | Source |

@@ -7,6 +7,8 @@
 #   -q   print only repos with findings
 # exit: 0 = nothing found, 2 = at least one repo applicable, 3 = nothing found but some files unreadable, 1 = setup error
 #       (REVIEW mentions alone do not change the exit code)
+# Each repo also gets a VERSIONS column from brotli-cve-check.sh dir (lockfiles/requirements/.nvmrc...: would a vulnerable
+# decoder be installed?). APPLICABLE + VULNERABLE versions is the combination to fix first.
 # Credit: detection is JFrog's (github.com/jfrog/vulnerability_scanners, Apache-2.0); this wraps it.
 # Needs python3 >= 3.10, curl, git. Fetches JFrog's scripts (pinned commit) into a temp dir plus a throwaway
 # venv for tree-sitter; nothing is installed system-wide and your repos are only read.
@@ -30,6 +32,11 @@ command -v curl >/dev/null || die "curl not found"
 command -v git >/dev/null || die "git not found"
 
 W=$(mktemp -d) && trap 'rm -rf "$W"' EXIT
+# version check: the sibling script when run from a clone, else fetched from this repo
+CVE=$(cd "$(dirname "$0")" 2>/dev/null && pwd)/brotli-cve-check.sh
+[ -f "$CVE" ] || { CVE=$W/brotli-cve-check.sh
+  curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 https://raw.githubusercontent.com/datmt/vulcheck/main/brotli/brotli-cve-check.sh -o "$CVE" \
+    || die "download failed: brotli-cve-check.sh"; }
 for f in $FILES; do curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 "$JF_RAW/$f" -o "$W/$f" || die "download failed: $f"; done
 "$PY" -m venv "$W/venv" && "$W/venv/bin/pip" install -q --disable-pip-version-check \
   tree-sitter==0.26.0 tree-sitter-javascript==0.25.0 tree-sitter-typescript==0.23.2 \
@@ -71,6 +78,25 @@ mapfile -t REPOS < <(find "$@" \( -name node_modules -o -name site-packages -o -
   -o -type d -name .git -prune -print 2>/dev/null | sed 's#/\.git$##' | sort -u)
 [ ${#REPOS[@]} -gt 0 ] || die "no git repos under: $*"
 
+# versions: one dir check per root (cwd=/ keeps targets absolute), rows = kind|target|VULNERABLE|REVIEW|ok|found
+: > "$W/ver.tsv"
+for r in "$@"; do
+  abs=$(cd "$r" 2>/dev/null && pwd) || continue
+  rm -f "$W/one.tsv"  # exit 2 just means "vulnerable found", so don't gate on it
+  (cd / && NO_COLOR=1 TSV="$W/one.tsv" bash "$CVE" "dir:$abs" >/dev/null 2>&1)
+  [ -f "$W/one.tsv" ] && cat "$W/one.tsv" >> "$W/ver.tsv"
+done
+# worst version result for a repo: its dir rows minus those under nested repos
+ver_of() {
+  local repo=$1 o worst=- row t res
+  while IFS='|' read -r _ t res _; do
+    case $t in "$repo"|"$repo"/*) ;; *) continue;; esac
+    for o in "${REPOS[@]}"; do case $o in "$repo"/*) case $t in "$o"|"$o"/*) continue 2;; esac;; esac; done
+    case $res in VULNERABLE) echo VULNERABLE; return;; REVIEW) worst=REVIEW;; *) [ $worst = - ] && worst=ok;; esac
+  done < "$W/ver.tsv"
+  echo $worst
+}
+
 # severity: 0 clean, 1 review (mentions only), 2 incomplete/error, 3 applicable
 sev_of() { case $1 in 0) echo 0;; 1) echo 3;; *) echo 2;; esac; }
 
@@ -89,6 +115,8 @@ for repo in "${REPOS[@]}"; do
   s1=$(sev_of $rc1) s2=$(sev_of $rc2) sev=0
   [ -n "$mentions" ] && sev=1
   [ "$s1" -gt $sev ] && sev=$s1; [ "$s2" -gt $sev ] && sev=$s2
+  ver=$(ver_of "$(cd "$repo" && pwd)")
+  case $ver in VULNERABLE) vc="${R}VULNERABLE${N}";; REVIEW) vc="${Y}review${N}";; ok) vc="${G}ok${N}";; *) vc="-";; esac
   case $sev in
     0) v="${G}not applicable${N}";;
     1) v="${Y}REVIEW (brotli mentioned in $(echo "$mentions" | wc -l) file(s))${N}";;
@@ -102,12 +130,15 @@ for repo in "${REPOS[@]}"; do
     [ -n "$mentions" ] && printf '[Other languages, not analysed: review by hand]\n%s\n' "$mentions"
     echo
   fi
-  ROWS+=("$sev|$repo|$v")
+  [ $sev -eq 3 ] && [ "$ver" = VULNERABLE ] && sev=4  # fix these first
+  ROWS+=("$sev|$repo|$v|$vc")
 done
 
 echo "Brotli CVE-2026-111497 code scan: ${#REPOS[@]} repos"
-printf '%s\n' "${ROWS[@]}" | sort -t'|' -k1,1nr | while IFS='|' read -r sev repo v; do
+W2=$((42+${#G}+${#N}))
+printf '  %-60s %-42s %s\n' REPO CODE VERSIONS
+printf '%s\n' "${ROWS[@]}" | sort -t'|' -k1,1nr | while IFS='|' read -r sev repo v vc; do
   [ $QUIET -eq 1 ] && [ "$sev" = 0 ] && continue
-  printf '  %-60s %s\n' "$repo" "$v"
+  printf "  %-60s %-${W2}s %s\n" "$repo" "$v" "$vc"
 done
 exit $RC
