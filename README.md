@@ -232,7 +232,7 @@ See [`Dockerfile.snippets`](Dockerfile.snippets): `ca-certificates` upgrade for 
 One-liners, no clone needed (read the script first; only `--fix` changes anything):
 
 ```bash
-B=https://raw.githubusercontent.com/datmt/emudhra-fix/main/brotli-cve-check.sh
+B=https://raw.githubusercontent.com/datmt/vulcheck/main/brotli-cve-check.sh
 curl -fsSL $B | bash -s -- dir                      # dependency files under the current dir
 curl -fsSL $B | bash -s -- host                     # this machine
 curl -fsSL $B | bash -s -- ssh:user@server          # another machine over ssh
