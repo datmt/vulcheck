@@ -92,7 +92,7 @@ ver_of() {
   while IFS='|' read -r _ t res _; do
     case $t in "$repo"|"$repo"/*) ;; *) continue;; esac
     for o in "${REPOS[@]}"; do case $o in "$repo"/*) case $t in "$o"|"$o"/*) continue 2;; esac;; esac; done
-    case $res in VULNERABLE) echo VULNERABLE; return;; REVIEW) worst=REVIEW;; *) [ $worst = - ] && worst=ok;; esac
+    case $res in VULNERABLE) echo VULNERABLE; return;; ERROR) worst=ERROR;; REVIEW) [ $worst = ERROR ] || worst=REVIEW;; *) [ $worst = - ] && worst=ok;; esac
   done < "$W/ver.tsv"
   echo $worst
 }
@@ -116,7 +116,7 @@ for repo in "${REPOS[@]}"; do
   [ -n "$mentions" ] && sev=1
   [ "$s1" -gt $sev ] && sev=$s1; [ "$s2" -gt $sev ] && sev=$s2
   ver=$(ver_of "$(cd "$repo" && pwd)")
-  case $ver in VULNERABLE) vc="${R}VULNERABLE${N}";; REVIEW) vc="${Y}review${N}";; ok) vc="${G}ok${N}";; *) vc="-";; esac
+  case $ver in VULNERABLE) vc="${R}VULNERABLE${N}";; ERROR) vc="${R}ERROR (java not resolved)${N}";; REVIEW) vc="${Y}review${N}";; ok) vc="${G}ok${N}";; *) vc="-";; esac
   case $sev in
     0) v="${G}not applicable${N}";;
     1) v="${Y}REVIEW (brotli mentioned in $(echo "$mentions" | wc -l) file(s))${N}";;

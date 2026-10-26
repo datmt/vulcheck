@@ -19,7 +19,8 @@ Out-of-bounds write in the Brotli C decoder, reachable through Node.js, the Pyth
 |---|---|
 | PyPI `brotli` >= 1.0.3, < 1.2.1 / `brotlicffi` >= 1.0.3, < 1.2.1.0 (any venv, found by `*.dist-info`) | `VULNERABLE` |
 | Node.js 22 / 24 / 26 below 22.23.4 / 24.22.1 / 26.12.1 (bundled decoder) | `VULNERABLE` |
-| Java jars named `*brotli*`, npm `iltorb` / `brotli-wasm`, native `libbrotlidec.so*` | `REVIEW` (check the vendor or distro advisory; backports keep old version numbers) |
+| Java Brotli4j (`com.aayushatharva.brotli4j`: `brotli4j`, `all`, `native-*` jars) <= 1.23.0; it bundles its own C decoder, so patching the OS `libbrotli` does not help | `VULNERABLE` (fixed in 1.24.0, [advisory](https://github.com/hyperxpro/Brotli4j/security/advisories/GHSA-x524-jrqf-vwq6)) |
+| Other jars named `*brotli*` (e.g. `org.brotli:dec`, a pure-Java port), npm `iltorb` / `brotli-wasm`, native `libbrotlidec.so*` | `REVIEW` (check the vendor or distro advisory; backports keep old version numbers) |
 
 One-liners, no clone needed (read the script first; only `--fix` changes anything):
 
@@ -53,13 +54,13 @@ KUBECTL='docker exec k3d-mycluster-server-0 kubectl' ./brotli-cve-check.sh k8s  
 ./brotli-cve-check.sh my-api python:3.12                                        # specific containers or images
 ```
 
-Each target gets a block with every finding, then a summary table sorted worst first. Colour shows on a terminal; `NO_COLOR=1` turns it off. Exit code is 2 if anything is `VULNERABLE`, 0 otherwise.
+Each target gets a block with every finding, then a summary table sorted worst first. Colour shows on a terminal; `NO_COLOR=1` turns it off. Exit code is 2 if anything is `VULNERABLE`, 3 if nothing is but some Java projects could not be resolved (see below), 0 otherwise.
 
 `host` and `ssh:` run the same probe on a plain machine (Linux, macOS, BSD; needs only `sh` and `find`). Besides every Python venv, Node and jar on disk (skipping `/proc`, `/sys`, `/dev`, `/run`, `/mnt`, `/media` and container storage: `/var/lib/docker`, `containerd`, `containers`, `kubelet`, `rancher`; use `containers` / `images` for those), they check `curl -V` for the libbrotli it links and the installed `libbrotli*` package (dpkg, rpm, apk, pacman, brew). Distros often backport the fix without changing the version, so curl, packages and native libraries are `REVIEW` (vulnerable only if your distro hasn't patched; check its security tracker), while Python and Node versions are decisive. Over `ssh:` the probe is piped to `sh -s`; use your usual ssh keys or agent.
 
 `k8s` lists pod and init-container images with `kubectl`, pulls each unique image locally if it isn't already there (`docker login` first for a private registry; images that can't be pulled show `PULL-FAILED`, not checked), scans it, then prints a per-pod table. It checks what the image contains, not what a pod mounts or installs at start-up, and scans the local platform's variant of a multi-arch image.
 
-**`dir` (the practical fix).** An in-place upgrade is undone by the next `uv sync` or image build, so scan what your projects *would install*: `dir` walks the current directory (or `dir:<path>`; skips `node_modules`, `.git`, venvs, `.cache`) and reports one row per project directory. It reads, without installing anything:
+**`dir` (the practical fix).** An in-place upgrade is undone by the next `uv sync` or image build, so scan what your projects *would install*: `dir` walks the current directory (or `dir:<path>`; skips `node_modules`, `.git`, venvs, `.cache`) and reports one row per project directory. It reads, without installing anything (Java build tools excepted, see below):
 
 | File | Verdict |
 |---|---|
@@ -68,13 +69,16 @@ Each target gets a block with every finding, then a summary table sorted worst f
 | `pyproject.toml`, `Pipfile`, `environment*.yml` | same rules for the declared spec |
 | `.nvmrc`, `.node-version`, `.tool-versions`, `Dockerfile* FROM node:X.Y.Z` | Node below 22.23.4 / 24.22.1 / 26.12.1: `VULNERABLE`; floating tags like `24`: `REVIEW`; end-of-life lines (20, 23, 25 and older, which get no fix): `REVIEW`, move to 22/24/26 |
 | `package-lock.json`, `yarn.lock`, `pnpm-lock.yaml`, `package.json` | `iltorb`, `brotli-wasm`, `brotli-dec-wasm`: `REVIEW` |
-| `pom.xml`, `build.gradle*`, `gradle.lockfile`, `libs.versions.toml` | `brotli4j`, `org.brotli`: `REVIEW` |
+| `pom.xml`, `build.gradle*`, `settings.gradle*` | resolved with `mvn dependency:tree` / a Gradle dependency report (see below): `brotli4j` <= 1.23.0, direct or transitive: `VULNERABLE`; `org.brotli`: `REVIEW` |
+| `gradle.lockfile`, `libs.versions.toml` (no build file next to them) | `brotli4j` with a literal or catalog-resolved version <= 1.23.0: `VULNERABLE`; version held in a variable or BOM: `REVIEW` |
+
+**Java projects are resolved with Maven or Gradle.** Reading `pom.xml` text misses `brotli4j` pulled in transitively (a framework that depends on it), so for each Java project `dir` runs `mvn dependency:tree` (using `./mvnw` if present) and/or a Gradle dependency report for all subprojects (using `./gradlew` if present), once at the top of each module tree. If `mvn` / `gradle` is not available and the project has no wrapper, or the build fails (offline, private repository, broken build), the target shows `ERROR`, a red "could NOT be fully checked" banner lists it, and the exit code is 3 (2 still wins if something is `VULNERABLE`). It never reports such a project as `ok`. Caveats: this needs network access, it runs build tooling on the project (Gradle evaluates the repo's build scripts and a wrapper is the repo's own script, so only scan code you trust), and it can take minutes on a large tree. `host`, `containers` and `images` scans still only read files.
 
 The how-to-fix block is a table (REPO, FILE, NOW, FIX), one row per file or line, grouped by git repo, and names the exact edit: the `Dockerfile` line (`FROM node:24-alpine` -> `node:24.22.1-alpine`, or rebuild with `--pull --no-cache`), the `.nvmrc` change, the requirements/pyproject line, and one merged lock command per project. It gives the project-level command: `uv lock --upgrade-package brotli && uv sync`, `poetry update brotli`, `pdm update brotli`, `pipenv update brotli`, or which line to edit in a requirements/pyproject file. It sees direct and locked dependencies only; a package that is only pulled in by something without a lock file is not visible, so pair it with `host` or `images`.
 
 **Fixes.** Whenever something is `VULNERABLE` the script ends with a "how to fix" block: the exact `<venv>/bin/python -m pip install -U 'brotli>=1.2.1'` per venv, `conda install -p <env>` for conda envs (not pip), `uv cache clean` for uv caches, rebuild instructions for containers and images, and the Node versions to move to. `--fix` applies only the host venv upgrades (`pip`, or `uv pip` for uv-created venvs that have no pip; a failure shows pip's last error line), after listing them and asking `[y/N]` (`-y` skips the question). It never touches conda envs, caches, Node, OS packages, containers or `ssh:` targets. Restart the services using an upgraded venv, then re-run the check.
 
-Limits: it doesn't open jars nested inside fat jars, and doesn't see statically linked binaries. Container and image scans stay inside the container's own filesystem (not mounted volumes), and a host scan skips network mounts under `/mnt` and `/media`, so a clean result isn't proof. The Node fix versions come from the [Node.js October 2026 security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases); confirm them there. A stopped container can't be exec'd; scan its image instead.
+Limits: it doesn't open jars nested inside fat jars (a Spring Boot `BOOT-INF/lib/brotli4j-*.jar` is not seen; check the build files with `dir`), and doesn't see statically linked binaries. Container and image scans stay inside the container's own filesystem (not mounted volumes), and a host scan skips network mounts under `/mnt` and `/media`, so a clean result isn't proof. The Node fix versions come from the [Node.js October 2026 security release](https://nodejs.org/en/blog/vulnerability/october-2026-security-releases); confirm them there. A stopped container can't be exec'd; scan its image instead.
 
 ## Your own code: `brotli-code-scan.sh`
 
