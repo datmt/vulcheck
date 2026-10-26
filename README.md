@@ -1,4 +1,4 @@
-# emudhra-fix
+# vulcheck
 
 > Also in this repo: [`brotli-cve-check.sh`](#brotli-cve-check-ghsa-9v8h-qqgm-4m35--cve-2026-111497), a scanner for the Brotli decoder CVE-2026-111497 on hosts, containers, images and Kubernetes.
 
@@ -25,11 +25,11 @@ Updating the host does **not** fix running containers. Each image carries its ow
 One-liner, no clone needed (read the script first: `host` runs `sudo`, `docker-fix` recreates containers):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/datmt/emudhra-fix/main/emudhra.sh | bash -s -- check
-curl -fsSL https://raw.githubusercontent.com/datmt/emudhra-fix/main/emudhra.sh | bash -s -- docker-check
-curl -fsSL https://raw.githubusercontent.com/datmt/emudhra-fix/main/emudhra.sh | bash -s -- docker-check -q
-curl -fsSL https://raw.githubusercontent.com/datmt/emudhra-fix/main/emudhra.sh | bash -s -- host
-curl -fsSL https://raw.githubusercontent.com/datmt/emudhra-fix/main/emudhra.sh | bash -s -- k8s-check -q
+curl -fsSL https://raw.githubusercontent.com/datmt/vulcheck/main/emudhra.sh | bash -s -- check
+curl -fsSL https://raw.githubusercontent.com/datmt/vulcheck/main/emudhra.sh | bash -s -- docker-check
+curl -fsSL https://raw.githubusercontent.com/datmt/vulcheck/main/emudhra.sh | bash -s -- docker-check -q
+curl -fsSL https://raw.githubusercontent.com/datmt/vulcheck/main/emudhra.sh | bash -s -- host
+curl -fsSL https://raw.githubusercontent.com/datmt/vulcheck/main/emudhra.sh | bash -s -- k8s-check -q
 ```
 
 Or from a clone:
